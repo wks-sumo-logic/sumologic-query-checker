@@ -1,0 +1,1 @@
+# sumologic-query-checker
