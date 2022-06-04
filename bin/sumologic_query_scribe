@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Explanation: sumologic scribe rewrites queries
+
+Usage:
+   $ python  sumologic_query_scribe [ options ]
+
+Style:
+   Google Python Style Guide:
+   http://google.github.io/styleguide/pyguide.html
+
+    @name           sumologic_query_scribe
+    @version        1.0.0
+    @author-name    Wayne Schmidt
+    @author-email   wschmidt@sumologic.com
+    @license-name   APACHE 2.0
+    @license-url    http://www.apache.org/licenses/LICENSE-2.0
+"""
+
+__version__ = 1.00
+__author__ = "Wayne Schmidt (wschmidt@sumologic.com)"
+
+import argparse
+import os
+import csv
+import sys
+import pathlib
+import re
+import datetime
+import pandas
+
+sys.dont_write_bytecode = 1
+
+PARSER = argparse.ArgumentParser(description="""
+This rewrites and organizes Sumo Logic queries
+""")
+
+PARSER.add_argument('-i', metavar='<queryinput>', dest='queryinput', \
+                    required=True, help='specify query input')
+
+PARSER.add_argument('-o', metavar='<queryoutput>', dest='queryoutput', \
+                    help='specify query output')
+
+PARSER.add_argument("-v", type=int, default=0, metavar='<verbose>', \
+                    dest='verbose', help="specify output level")
+
+ARGS = PARSER.parse_args(args=None if sys.argv[1:] else ['--help'])
+
+ETCDIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../etc'))
+
+OPSCFG = os.path.join(ETCDIR, 'operators.csv')
+OPSDICT = {}
+OPSDICT = pandas.read_csv(OPSCFG, header=None, index_col=0).squeeze("columns").to_dict()
+if ARGS.verbose > 8:
+    print(OPSDICT)
+
+TYPECFG = os.path.join(ETCDIR, 'classifier.csv')
+TYPEDICT = {}
+TYPEDICT = pandas.read_csv(TYPECFG, header=None, index_col=0).squeeze("columns").to_dict()
+if ARGS.verbose > 8:
+    print(TYPEDICT)
+
+RIGHTNOW = datetime.datetime.now()
+
+DSTAMP = RIGHTNOW.strftime("%Y%m%d")
+TSTAMP = RIGHTNOW.strftime("%H%M%S")
+
+SRCTAG = 'sumoscribe'
+
+if os.name == 'nt':
+    VARTMPDIR = os.path.join ( "C:", "Windows", "Temp" )
+else:
+    VARTMPDIR = os.path.join ( "/", "var", "tmp" )
+
+OUTDIR = os.path.join(VARTMPDIR, SRCTAG, DSTAMP)
+
+QUERYNAME = 'Sumo Logic Generated Query'
+QUERYREPO = 'https://github.com/sumologic-library/generated-queries/'
+QUERYAUTH = 'querylibrarian@sumologic.com'
+
+BEGIN = "{0:<20}{1:}"
+QUERY = "{0:}"
+FINAL = "{0:<20}{1:}"
+
+def main():
+    """
+    This is a driver for extract the CSV files and any other transform required
+    """
+
+    if ARGS.verbose > 4:
+        print(f'Creating: {OUTDIR}')
+
+    os.makedirs(OUTDIR, exist_ok=True)
+
+    srcfile = os.path.abspath(ARGS.queryinput)
+    srcname = os.path.basename(srcfile)
+
+    dstfile = os.path.join(OUTDIR, srcname)
+
+    if ARGS.verbose > 4:
+        print(f'Source File: {srcfile}')
+
+    if ARGS.verbose > 4:
+        print(f'Scribe File: {dstfile}')
+
+    sumowash(srcfile, dstfile)
+
+def sumowash(mysrcfile,mydstfile):
+    """
+    This washes the query, regularizing the query
+    """
+
+    if ARGS.verbose > 6:
+        print(f'Reading Source File: {mysrcfile}')
+
+    with open(mysrcfile, "r", encoding='utf8') as srcobj:
+        filecontents = srcobj.read()
+
+    if ARGS.verbose > 6:
+        print(f'Writing Scribe File: {mydstfile}')
+
+    with open(mydstfile, "a+", encoding='utf8') as dstfileobj:
+        dstfileobj.write('{}'.format('/*' + '\n'))
+        dstfileobj.write(BEGIN.format("    Queryname:", QUERYNAME + '\n'))
+        dstfileobj.write(BEGIN.format("    SourceUrl:", QUERYREPO + '\n'))
+        dstfileobj.write(BEGIN.format("    Author:", QUERYAUTH + '\n'))
+        dstfileobj.write('{}'.format('*/' + '\n'))
+
+        url_list = []
+        keyword_list = []
+
+        for fileline in filecontents.splitlines():
+            fileline = fileline.rstrip()
+            fileline = fileline.lstrip()
+            if not fileline:
+                continue
+            if fileline.isspace():
+                continue
+
+            ### java comments ### .*?([^:]\/{2}.*?$)
+            ### c++ comments  ### /\*(\s|\S)+\*/
+
+            rem = re.match(r"(_\w+)\s?=\s?([\w|\S|\/]+)\s?((\S|\s+)+)?", fileline)
+            if rem:
+                fileline = rem.groups()[0] + '=' + '"' + '{{data_source}}' + '"'
+                if rem.groups()[2]:
+                    fileline = fileline + ' ' + rem.groups()[2]
+
+            rem = re.match(r"(.*?)([^:]\/{2}.*?)?$", fileline)
+            if rem.groups()[1]:
+                fileline = rem.groups()[0]+ '\n' + rem.groups()[1].lstrip()
+
+            fileline = re.sub(r'(\s|\w)\|(\s|\w)', r'\n|\1', fileline)
+            fileline = fileline.lstrip()
+
+            dstfileobj.write(fileline + '\n')
+            fileline = re.sub('\W+\s*', ' ', fileline)
+            for word in fileline.split():
+                if word in OPSDICT.keys():
+                    url_list.append(OPSDICT[word])
+
+        url_list = list(set(url_list))
+
+        dstfileobj.write('{}'.format('/*' + '\n'))
+        for url_ref in url_list:
+            dstfileobj.write(FINAL.format("    Reference:", url_ref + '\n'))
+        dstfileobj.write('{}'.format('*/' + '\n'))
+
+if __name__ == '__main__':
+    main()
