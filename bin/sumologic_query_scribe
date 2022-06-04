@@ -24,9 +24,7 @@ __author__ = "Wayne Schmidt (wschmidt@sumologic.com)"
 
 import argparse
 import os
-import csv
 import sys
-import pathlib
 import re
 import datetime
 import pandas
@@ -129,7 +127,6 @@ def sumowash(mysrcfile,mydstfile):
         dstfileobj.write('{}'.format('*/' + '\n'))
 
         url_list = []
-        keyword_list = []
 
         for fileline in filecontents.splitlines():
             fileline = fileline.rstrip()
@@ -156,7 +153,7 @@ def sumowash(mysrcfile,mydstfile):
             fileline = fileline.lstrip()
 
             dstfileobj.write(fileline + '\n')
-            fileline = re.sub('\W+\s*', ' ', fileline)
+            fileline = re.sub(r'\W+\s*', ' ', fileline)
             for word in fileline.split():
                 if word in OPSDICT.keys():
                     url_list.append(OPSDICT[word])
